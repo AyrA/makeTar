@@ -9,7 +9,7 @@ namespace makeTar
         {
             using (var FS = File.Create(Environment.ExpandEnvironmentVariables(@"%USERPROFILE%\Desktop\__empty.tar")))
             {
-                using (var TS = new TAR.TarStream(FS, false))
+                using (var TS = new TAR.TarWriter(FS, false))
                 {
                     TS.AddDirectory(Environment.ExpandEnvironmentVariables(@"%USERPROFILE%\Desktop\Images"));
                     TS.FinalizeStream();
