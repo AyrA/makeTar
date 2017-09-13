@@ -20,8 +20,20 @@ namespace makeTar.TAR
         ExtendedHeader = 'x'
     }
 
+    [Flags]
+    public enum Permissions : int
+    {
+        None = 0,
+        Execute = 1,
+        Write = 2,
+        Read = 4,
+        All = Execute | Write | Read
+    }
+
     public class TarHeader
     {
+        public const int BLOCKSIZE = 512;
+
         #region Original Header
         public string FileName
         { get; set; }
@@ -55,8 +67,16 @@ namespace makeTar.TAR
         { get; set; }
         #endregion
 
+        public TarHeader()
+        {
+            SetPerms();
+            WriteUStarHeader = true;
+            Type = TarLinkType.File;
+        }
+
         public void Write(Stream Output)
         {
+            SplitFileName();
             using (var MS = new MemoryStream())
             {
                 using (var BW = new BinaryWriter(MS, Encoding.ASCII, true))
@@ -85,19 +105,8 @@ namespace makeTar.TAR
                     BW.Write(ToOctal((long)LastModified.ToUniversalTime().Subtract(LinuxTime).TotalSeconds, 11));
                     BW.Write((byte)0);
 
-                    //Checksum (148-156, sum of all header bytes assuming checksum is 8 times 0x20)
-                    BW.Flush();
-                    BW.Write(
-                        //Existing Data
-                        ToOctal(MS.ToArray().Sum(m => m) +
-                        //Blank Checksum
-                        8 * 0x20 +
-                        //Type byte
-                        (int)Type +
-                        //Linked file name
-                        ToPaddedBytes(NameOfLinkedFile, 99).Sum(m => m), 6));
-                    BW.Write((byte)0);
-                    BW.Write((byte)' ');
+                    //Checksum (148-156, Template)
+                    BW.Write(new byte[] { 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20 });
 
                     //Type (156-157)
                     BW.Write((byte)Type);
@@ -113,7 +122,7 @@ namespace makeTar.TAR
                         //Header
                         BW.Write(ToPaddedBytes("ustar", 6));
                         //Header Version
-                        BW.Write(new byte[] {0x30, 0x30 });
+                        BW.Write(new byte[] { 0x30, 0x30 });
 
                         //Owner Name
                         BW.Write(ToPaddedBytes(OwnerName, 31));
@@ -145,8 +154,32 @@ namespace makeTar.TAR
                     }
                     BW.Flush();
                 }
+                var Checksum = MS.ToArray().Sum(m => m);
+                MS.Seek(148, SeekOrigin.Begin);
+                MS.Write(ToOctal(Checksum, 6), 0, 6);
+                MS.WriteByte(0);
                 MS.Seek(0, SeekOrigin.Begin);
                 MS.CopyTo(Output);
+            }
+        }
+
+        public void SetPerms(Permissions User = Permissions.All, Permissions Owner = Permissions.All, Permissions Other = Permissions.All)
+        {
+            FileMode = (1 << 15) + ((int)User << 6) + ((int)Owner << 3) + (int)Other;
+        }
+
+        private void SplitFileName()
+        {
+            if (Encoding.UTF8.GetByteCount(FileName) > 99)
+            {
+                int cutoff = 0;
+                var Segments = FileName.Split('/');
+                while (Encoding.UTF8.GetByteCount(FileName) > 99)
+                {
+                    ++cutoff;
+                    FileName = string.Join("/", Segments.Skip(cutoff).ToArray());
+                    FilenamePrefix = string.Join("/", Segments.Take(cutoff).ToArray());
+                }
             }
         }
 
@@ -182,6 +215,11 @@ namespace makeTar.TAR
         {
             var Result = Convert.ToString(Number, 8);
             return Encoding.ASCII.GetBytes(Result.Length > MinLength ? Result : Result.PadLeft(MinLength, '0'));
+        }
+
+        public static byte[] GetBlock()
+        {
+            return new byte[BLOCKSIZE];
         }
     }
 }
